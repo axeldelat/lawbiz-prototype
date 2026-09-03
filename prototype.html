@@ -66,8 +66,18 @@
     background: white;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.1), inset 0 0 0 1px rgba(255,255,255,0.08);
     flex-shrink: 0;
+  }
+  /* Faint glass sheen across the top of the screen, purely decorative
+     (pointer-events: none so it never blocks taps on real content). */
+  .iphone-frame::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0) 20%);
+    pointer-events: none;
+    z-index: 20;
   }
   .iphone-notch {
     width: 100px;
@@ -79,6 +89,18 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
+  }
+  /* Tiny camera dot inside the notch for a touch more realism. */
+  .iphone-notch::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    right: 16px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #333;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
   }
   .iphone-home-indicator {
     width: 120px;
@@ -143,12 +165,64 @@
     stroke-dasharray: 24;
     animation: drawCheck 0.4s ease-out forwards;
   }
+
+  /* ---- Task 5: screen-transition + interaction animations -------- */
+  /* Whole-panel fade+slide, retriggered from JS on every step
+     navigation (see retriggerPanelTransition()). Reuses fadeSlideUp
+     rather than a near-duplicate keyframe. */
+  .panel-transition {
+    animation: fadeSlideUp 0.35s ease-out both;
+  }
+
+  /* Payment sheets and other "sub-cards" that appear inside an
+     already-rendered panel: fade + gentle scale-up, distinct from the
+     slide-up used for full reveals. */
+  @keyframes scaleIn {
+    from { transform: scale(0.95); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+  .scale-in {
+    animation: scaleIn 0.3s ease-out both;
+  }
+
+  /* Generated PDF / document previews: fade in while their paper
+     shadow grows in from flat, so the page feels like it lifts off
+     the panel. The resting state matches .paper-shadow below. */
+  @keyframes pdfPreviewIn {
+    from { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 rgba(26,58,26,0); }
+    to   { opacity: 1; transform: translateY(0);    box-shadow: 0 14px 28px -8px rgba(26,58,26,0.18), 0 2px 6px rgba(26,58,26,0.08); }
+  }
+  .pdf-preview-in {
+    animation: pdfPreviewIn 0.5s ease-out both;
+  }
+  /* Static "paper" shadow for document previews that don't animate in
+     on interaction (already visible when the step loads). */
+  .paper-shadow {
+    box-shadow: 0 14px 28px -8px rgba(26,58,26,0.18), 0 2px 6px rgba(26,58,26,0.08);
+  }
+
+  /* Mobile timeline: pulsing ring on the active node, brand-green. */
+  @keyframes pulseRing {
+    0%   { box-shadow: 0 0 0 0 rgba(124, 179, 66, 0.4); }
+    70%  { box-shadow: 0 0 0 8px rgba(124, 179, 66, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(124, 179, 66, 0); }
+  }
+  .node-active {
+    animation: pulseRing 2s ease-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-slide-up, .panel-transition, .scale-in, .pdf-preview-in,
+    .push-notification, .pulse-dot, .node-active, .check-animate svg path {
+      animation: none !important;
+    }
+  }
 </style>
 </head>
 <body>
 
 <!-- ================= HEADER ================= -->
-<header class="fixed top-0 w-full h-16 bg-lawbiz-dark flex items-center justify-between px-6 z-50">
+<header class="fixed top-0 w-full h-16 bg-lawbiz-dark flex items-center justify-between px-6 z-50 shadow-md">
   <div class="flex items-center gap-2">
     <svg viewBox="0 0 150 42" class="h-8 w-auto text-white" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Lawbiz">
       <g fill="currentColor">
@@ -189,12 +263,12 @@
 </main>
 
 <!-- ================= BOTTOM BAR ================= -->
-<footer class="fixed bottom-0 w-full h-20 bg-lawbiz-dark flex items-center px-6 z-50 gap-4">
+<footer class="fixed bottom-0 w-full h-20 bg-lawbiz-dark flex items-center px-6 z-50 gap-4 shadow-[0_-4px_16px_rgba(0,0,0,0.18)]">
   <button id="btn-prev" type="button" class="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm cursor-pointer transition-colors">← Atrás</button>
   <div id="narrative" class="flex-1 text-center text-white px-2" aria-live="polite">
     <p id="narrative-text" class="text-sm leading-snug"></p>
   </div>
-  <button id="btn-next" type="button" class="px-4 py-2 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-sm cursor-pointer transition-colors">Siguiente →</button>
+  <button id="btn-next" type="button" class="px-4 py-2 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-sm cursor-pointer transition hover:shadow-md active:scale-[0.98]">Siguiente →</button>
 </footer>
 
 <script>
@@ -262,6 +336,10 @@ const app = {
     renderMobilePanel(this.currentStep, this.interactionState);
     renderNarrative(this.currentStep);
     renderNavButtons(this.currentStep);
+    // Step navigation only (not triggerInteraction — those screens
+    // already have their own targeted reveal animations) — see
+    // retriggerPanelTransition() below.
+    retriggerPanelTransition();
   },
 
   triggerInteraction(id) {
@@ -274,6 +352,24 @@ const app = {
     }
   }
 };
+
+/* ---------------- PANEL TRANSITION (Task 5) ----------------
+   Retriggers the .panel-transition fade+slide on the admin and mobile
+   panels every time a step navigation happens. Both elements survive
+   across renders (renderAdminPanel/renderMobilePanel only replace
+   className/innerHTML, not the nodes themselves), so simply adding
+   the class again would be a no-op if it was already present from the
+   previous navigation — remove it, force a reflow, then re-add it so
+   the animation genuinely restarts each time. */
+function retriggerPanelTransition() {
+  ['admin-panel', 'mobile-content'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('panel-transition');
+    void el.offsetWidth; // force reflow
+    el.classList.add('panel-transition');
+  });
+}
 
 /* ---------------- STEPPER (header) ---------------- */
 function renderStepper(currentStep) {
@@ -289,8 +385,12 @@ function renderStepper(currentStep) {
     const isActive = i === currentStep;
     const isCompleted = i < currentStep;
     circle.className = `w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold cursor-pointer transition-all ${
-      isActive ? 'bg-lawbiz-lime text-lawbiz-dark scale-110' :
-      isCompleted ? 'bg-lawbiz-lime/70 text-white' :
+      isActive ? 'bg-lawbiz-lime text-lawbiz-dark scale-110 shadow-md' :
+      // Solid lime + dark text (not the previous lime/70 + white, which
+      // only hit ~3.8:1 contrast) — same accessible pairing used for
+      // buttons and the active circle; still reads as "done" via the
+      // checkmark glyph vs the active circle's plain digit + scale-up.
+      isCompleted ? 'bg-lawbiz-lime text-lawbiz-dark' :
       'bg-gray-600 text-gray-300'
     }`;
     circle.textContent = isCompleted ? '✓' : i + 1;
@@ -379,8 +479,23 @@ function caseHeaderMarkup(estado) {
   return `
     <div class="flex items-center gap-3 mb-6 flex-wrap">
       <h1 class="font-display text-2xl text-lawbiz-dark">María García López <span class="text-lawbiz-text-light font-normal text-lg">— EXP-2026-001</span></h1>
-      <span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${estadoBadgeClasses(estado)}">${estado}</span>
+      <span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-colors duration-300 ${estadoBadgeClasses(estado)}">${estado}</span>
     </div>`;
+}
+
+/* "Action confirmed" pill badge — replaces a button once the gestor
+   has completed an interaction (crear expediente, enviar requisición,
+   etc). Solid Lawbiz dark-green with white text keeps AA contrast
+   (white-on-lime would not); the checkmark reuses the same stroke
+   icon as the mobile timeline for visual consistency, and the badge
+   fades/slides in via the existing .animate-fade-slide-up rather than
+   popping in instantly with the rest of the panel. */
+function confirmedBadge(text, extraClass) {
+  return `
+    <span class="animate-fade-slide-up inline-flex items-center gap-2 px-4 py-2.5 bg-lawbiz-dark text-white rounded-lg font-semibold text-sm shadow-sm ${extraClass || ''}">
+      <svg viewBox="0 0 24 24" class="w-4 h-4 text-lawbiz-lime-light shrink-0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 L9.5 18 L20 6"/></svg>
+      ${text}
+    </span>`;
 }
 
 /* ---------------- REUSABLE MOBILE TIMELINE ----------------
@@ -397,10 +512,18 @@ function renderMobileTimeline(items, opts) {
   opts = opts || {};
   const rows = items.map((item, i) => {
     const isLast = i === items.length - 1;
+    const isActive = item.status === 'active';
+    // Active node reads as "current step" via a slightly larger
+    // circle (32px vs the usual 28px) plus an infinite pulsing ring
+    // (.node-active, brand-green) instead of the flat static ring
+    // used before.
+    const sizeClasses = isActive ? 'w-8 h-8' : 'w-7 h-7';
+    // Dark text/checkmark on the lime fill, not white — white-on-lime
+    // only hits ~2.5:1 contrast (same fix as the header stepper).
     const circleClasses = item.status === 'completed'
-      ? 'bg-lawbiz-lime text-white'
-      : item.status === 'active'
-        ? 'bg-lawbiz-lime text-white ring-4 ring-lawbiz-lime/25'
+      ? 'bg-lawbiz-lime text-lawbiz-dark'
+      : isActive
+        ? 'node-active bg-lawbiz-lime text-lawbiz-dark'
         : 'bg-lawbiz-gray-mid text-lawbiz-text-light';
     const labelClasses = item.status === 'pending' ? 'text-lawbiz-text-light' : 'text-lawbiz-dark';
     const lineClasses = item.status === 'completed' ? 'bg-lawbiz-lime' : 'bg-lawbiz-gray-mid';
@@ -423,7 +546,7 @@ function renderMobileTimeline(items, opts) {
     return `
       <div class="flex gap-3 ${isLast ? '' : 'pb-6'}">
         <div class="flex flex-col items-center">
-          <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${circleClasses}">${glyph}</div>
+          <div class="${sizeClasses} rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${circleClasses}">${glyph}</div>
           ${isLast ? '' : `<div class="w-0.5 flex-1 mt-1 ${lineClasses}"></div>`}
         </div>
         <div class="flex-1 pt-0.5 min-w-0">
@@ -451,7 +574,7 @@ function renderDashboardAdmin() {
       <tr class="${isMaria ? 'bg-lawbiz-lime/10' : 'hover:bg-lawbiz-gray/60'} transition-colors">
         <td class="px-4 py-3 font-medium text-lawbiz-dark border-l-4 ${isMaria ? 'border-lawbiz-lime' : 'border-transparent'}">${c.cliente}</td>
         <td class="px-4 py-3 text-lawbiz-text-light font-mono text-xs">${c.expediente}</td>
-        <td class="px-4 py-3"><span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${estadoBadgeClasses(c.estado)}">${c.estado}</span></td>
+        <td class="px-4 py-3"><span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-colors duration-300 ${estadoBadgeClasses(c.estado)}">${c.estado}</span></td>
         <td class="px-4 py-3 text-lawbiz-text-light">${c.fecha}</td>
       </tr>`;
   }).join('');
@@ -462,7 +585,7 @@ function renderDashboardAdmin() {
         <h1 class="font-display text-3xl text-lawbiz-dark">Dashboard</h1>
         <p class="text-sm text-lawbiz-text-light mt-1">Todos tus casos activos, de un vistazo.</p>
       </div>
-      <div class="overflow-x-auto rounded-xl border border-lawbiz-gray-mid">
+      <div class="overflow-x-auto rounded-xl border border-lawbiz-gray-mid shadow-sm">
         <table class="w-full text-sm text-left">
           <thead class="bg-lawbiz-gray text-lawbiz-text-light uppercase text-xs tracking-wide">
             <tr>
@@ -504,7 +627,7 @@ function renderAltaAdmin(interactionState) {
           <h1 class="font-display text-3xl text-lawbiz-dark">Nuevo expediente</h1>
           <p class="text-sm text-lawbiz-text-light mt-1">Verifica los datos capturados del cliente antes de abrir su caso.</p>
         </div>
-        ${created ? `<span class="inline-flex items-center gap-2 px-4 py-2 bg-green-100 text-green-700 rounded-lg font-semibold text-sm shrink-0 whitespace-nowrap">✓ Expediente EXP-2026-001 creado</span>` : ''}
+        ${created ? confirmedBadge('Expediente EXP-2026-001 creado', 'shrink-0 whitespace-nowrap') : ''}
       </div>
 
       <div class="grid grid-cols-2 gap-4 max-w-2xl">
@@ -518,7 +641,7 @@ function renderAltaAdmin(interactionState) {
       <div class="mt-8 max-w-2xl">
         ${created
           ? `<p class="text-sm text-lawbiz-text-light">El cliente ya tiene acceso a su panel y puede realizar su pago inicial directamente desde la app. Revisa la vista del cliente →</p>`
-          : `<button id="btn-crear-expediente" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Crear expediente</button>`}
+          : `<button id="btn-crear-expediente" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Crear expediente</button>`}
       </div>
     </div>`;
 }
@@ -540,31 +663,7 @@ function renderAltaMobile(interactionState) {
       <div class="bg-lawbiz-gray rounded-xl p-4">
         <p class="text-[11px] font-semibold text-lawbiz-lime uppercase tracking-wide mb-1">Paso siguiente</p>
         <p class="text-sm font-semibold text-lawbiz-dark mb-3">Realiza tu pago</p>
-
-        <div class="bg-white rounded-lg p-3 space-y-2.5 border border-lawbiz-gray-mid">
-          <div>
-            <label class="block text-[10px] text-lawbiz-text-light mb-0.5">Número de tarjeta</label>
-            <div class="text-xs font-mono border border-lawbiz-gray-mid rounded-md px-2.5 py-2 bg-lawbiz-gray text-lawbiz-text whitespace-nowrap overflow-hidden">•••• •••• •••• 4242</div>
-          </div>
-          <div class="flex gap-2">
-            <div class="flex-1">
-              <label class="block text-[10px] text-lawbiz-text-light mb-0.5">Vencimiento</label>
-              <div class="text-sm border border-lawbiz-gray-mid rounded-md px-2.5 py-2 bg-lawbiz-gray text-lawbiz-text">12/28</div>
-            </div>
-            <div class="w-16">
-              <label class="block text-[10px] text-lawbiz-text-light mb-0.5">CVC</label>
-              <div class="text-sm border border-lawbiz-gray-mid rounded-md px-2.5 py-2 bg-lawbiz-gray text-lawbiz-text">•••</div>
-            </div>
-          </div>
-          <div class="flex items-center justify-between pt-1 pb-0.5">
-            <span class="text-xs text-lawbiz-text-light">Total a pagar</span>
-            <span class="text-sm font-bold text-lawbiz-dark">$1,000 MXN</span>
-          </div>
-          <button type="button" class="w-full bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2.5 text-sm transition-colors cursor-pointer">Pagar</button>
-          <div class="flex justify-center pt-0.5">
-            <span class="text-[9px] font-medium text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Powered by Stripe</span>
-          </div>
-        </div>
+        ${stripeFormMarkup('$1,000 MXN')}
       </div>
     </div>`;
 }
@@ -572,7 +671,7 @@ function renderAltaMobile(interactionState) {
 /* ---------------- PANTALLA 3: SOLICITUD ---------------- */
 function pdfPreviewMarkup() {
   return `
-    <div class="bg-white border border-lawbiz-gray-mid rounded-lg shadow-sm p-6 mx-auto" style="max-width: 420px;">
+    <div class="pdf-preview-in bg-white border border-lawbiz-gray-mid rounded-lg p-6 mx-auto" style="max-width: 420px;">
       <div class="flex items-center gap-2 pb-3 border-b border-lawbiz-gray-mid mb-4">
         <div class="text-lawbiz-dark w-5 h-6">${logoIconSvg('w-full h-full')}</div>
         <span class="font-display text-sm font-semibold text-lawbiz-dark tracking-wide">LAWBIZ</span>
@@ -599,18 +698,18 @@ function renderSolicitudAdmin(interactionState) {
 
   const actionArea = !generated
     ? `
-      <div class="border border-lawbiz-gray-mid rounded-xl p-6 max-w-xl">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-6 max-w-xl">
         <h3 class="font-display text-lg text-lawbiz-dark mb-2">Generar Solicitud ante COFEPRIS</h3>
         <p class="text-sm text-lawbiz-text-light mb-4">Con los datos ya capturados del expediente, Lawbiz arma automáticamente la solicitud de autorización sanitaria, lista para firma del cliente.</p>
-        <button id="btn-generar-solicitud" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Generar Solicitud</button>
+        <button id="btn-generar-solicitud" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Generar Solicitud</button>
       </div>`
     : `
-      <div class="border border-lawbiz-gray-mid rounded-xl p-5 max-w-xl bg-lawbiz-gray">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-5 max-w-xl bg-lawbiz-gray">
         ${pdfPreviewMarkup()}
         <div class="mt-4 flex justify-center">
           ${sent
-            ? `<span class="inline-flex items-center gap-2 px-4 py-2.5 bg-green-100 text-green-700 rounded-lg font-semibold text-sm">✓ Requisición enviada</span>`
-            : `<button id="btn-enviar-requisicion" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Enviar requisición de firma al cliente</button>`}
+            ? confirmedBadge('Requisición enviada')
+            : `<button id="btn-enviar-requisicion" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Enviar requisición de firma al cliente</button>`}
         </div>
       </div>`;
 
@@ -642,7 +741,7 @@ function renderSolicitudMobile(interactionState) {
                 3. Firma autógrafamente<br>
                 4. Escanéalo y súbelo aquí
               </p>
-              <button type="button" class="w-full mt-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer">Subir documento</button>
+              <button type="button" class="w-full mt-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2 text-sm transition hover:shadow-md active:scale-[0.98] cursor-pointer">Subir documento</button>
               <button type="button" class="w-full mt-2 text-center text-[11px] text-lawbiz-text-light underline underline-offset-2 cursor-pointer">¿Prefieres enviarlo físicamente? Ver dirección</button>
             </div>`,
         }
@@ -665,7 +764,7 @@ function renderSolicitudMobile(interactionState) {
 function scannedDocumentMarkup() {
   return `
     <div class="flex justify-center py-2">
-      <div class="-rotate-2 bg-white border border-lawbiz-gray-mid rounded-sm shadow-lg p-6 w-full" style="max-width: 380px;">
+      <div class="paper-shadow -rotate-2 bg-white border border-lawbiz-gray-mid rounded-sm p-6 w-full" style="max-width: 380px;">
         <div class="space-y-1.5 mb-8">
           <div class="h-1.5 bg-lawbiz-gray-mid/60 rounded w-full"></div>
           <div class="h-1.5 bg-lawbiz-gray-mid/60 rounded w-full"></div>
@@ -695,7 +794,7 @@ function renderFirmaAdmin(interactionState) {
     <div>
       ${caseHeaderMarkup('En trámite')}
 
-      <div class="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 max-w-xl">
+      <div class="flex items-start gap-3 bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 mb-6 max-w-xl shadow-sm">
         <div class="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">${fileIconSvg('w-4 h-4')}</div>
         <div>
           <p class="text-sm font-semibold text-amber-800">El cliente ha enviado sus documentos firmados</p>
@@ -703,17 +802,17 @@ function renderFirmaAdmin(interactionState) {
         </div>
       </div>
 
-      <div class="border border-lawbiz-gray-mid rounded-xl p-5 max-w-xl bg-lawbiz-gray">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-5 max-w-xl bg-lawbiz-gray">
         ${scannedDocumentMarkup()}
         <div class="mt-4 flex justify-center">
           ${confirmed
-            ? `<span class="inline-flex items-center gap-2 px-4 py-2.5 bg-green-100 text-green-700 rounded-lg font-semibold text-sm">✓ Documentos confirmados</span>`
-            : `<button id="btn-confirmar-recepcion" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Confirmar recepción</button>`}
+            ? confirmedBadge('Documentos confirmados')
+            : `<button id="btn-confirmar-recepcion" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Confirmar recepción</button>`}
         </div>
       </div>
 
       ${confirmed ? `
-      <div class="mt-6 max-w-xl bg-blue-50 border border-blue-200 rounded-xl p-4 animate-fade-slide-up">
+      <div class="mt-6 max-w-xl bg-blue-50 border-l-4 border-blue-400 rounded-xl p-4 shadow-sm animate-fade-slide-up">
         <p class="text-sm text-blue-800"><strong class="font-semibold">Siguiente paso:</strong> Ingresar solicitud ante COFEPRIS</p>
       </div>` : ''}
     </div>`;
@@ -756,17 +855,17 @@ function renderCofeprisAdmin(interactionState) {
 
   const content = !registered
     ? `
-      <div class="border border-lawbiz-gray-mid rounded-xl p-6 max-w-xl">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-6 max-w-xl">
         <h3 class="font-display text-lg text-lawbiz-dark mb-4">Registrar ingreso ante COFEPRIS</h3>
         <div class="space-y-4">
           ${inputField('Folio COFEPRIS', '263301EL789456')}
           ${inputField('Guía SEPOMEX', 'RN208033456MX')}
         </div>
-        <button id="btn-registrar-ingreso" type="button" class="mt-5 px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Registrar ingreso</button>
+        <button id="btn-registrar-ingreso" type="button" class="mt-5 px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Registrar ingreso</button>
       </div>`
     : `
       <div class="max-w-xl animate-fade-slide-up">
-        <div class="bg-green-50 border border-green-200 rounded-xl p-5">
+        <div class="bg-green-50 border-l-4 border-green-400 rounded-xl p-5 shadow-sm">
           <p class="text-sm font-bold text-green-800 mb-3">✓ Ingresado ante COFEPRIS</p>
           <div class="grid grid-cols-2 gap-3 text-sm mb-3">
             <div>
@@ -781,7 +880,7 @@ function renderCofeprisAdmin(interactionState) {
           <p class="text-sm text-green-800"><strong class="font-semibold">Estado:</strong> En evaluación — Tiempo estimado: 2-3 meses</p>
         </div>
 
-        <div class="border border-lawbiz-gray-mid rounded-xl mt-4">
+        <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm mt-4">
           ${renderMobileTimeline(sepomexTrackingItems(), { heading: 'Seguimiento del envío — SEPOMEX' })}
         </div>
       </div>`;
@@ -833,7 +932,7 @@ function renderCofeprisMobile(interactionState) {
 /* ---------------- PANTALLA 6: RESPUESTA COFEPRIS ---------------- */
 function cofeprisResponseMarkup() {
   return `
-    <div class="bg-white border border-lawbiz-gray-mid rounded-lg shadow-sm mx-auto overflow-hidden" style="max-width: 420px;">
+    <div class="paper-shadow bg-white border border-lawbiz-gray-mid rounded-lg mx-auto overflow-hidden" style="max-width: 420px;">
       <div class="bg-gray-100 border-b border-lawbiz-gray-mid px-5 py-3">
         <p class="text-[9px] font-semibold text-gray-500 tracking-wide">SECRETARÍA DE SALUD</p>
         <p class="text-[10px] font-bold text-gray-700 tracking-wide">COMISIÓN FEDERAL PARA LA PROTECCIÓN CONTRA RIESGOS SANITARIOS</p>
@@ -864,7 +963,7 @@ function cofeprisResponseMarkup() {
 
 function stripeFormMarkup(amountLabel, buttonLabel) {
   return `
-    <div class="bg-white rounded-lg p-3 space-y-2.5 border border-lawbiz-gray-mid">
+    <div class="scale-in bg-white rounded-lg p-3 space-y-2.5 border border-lawbiz-gray-mid shadow-sm">
       <div>
         <label class="block text-[10px] text-lawbiz-text-light mb-0.5">Número de tarjeta</label>
         <div class="text-xs font-mono border border-lawbiz-gray-mid rounded-md px-2.5 py-2 bg-lawbiz-gray text-lawbiz-text whitespace-nowrap overflow-hidden">•••• •••• •••• 4242</div>
@@ -883,7 +982,7 @@ function stripeFormMarkup(amountLabel, buttonLabel) {
         <span class="text-xs text-lawbiz-text-light">Total a pagar</span>
         <span class="text-sm font-bold text-lawbiz-dark">${amountLabel}</span>
       </div>
-      <button type="button" class="w-full bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2.5 text-sm transition-colors cursor-pointer">${buttonLabel || 'Pagar'}</button>
+      <button type="button" class="w-full bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2.5 text-sm transition hover:shadow-md active:scale-[0.98] cursor-pointer">${buttonLabel || 'Pagar'}</button>
       <div class="flex justify-center pt-0.5">
         <span class="text-[9px] font-medium text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Powered by Stripe</span>
       </div>
@@ -897,7 +996,7 @@ function renderRespuestaAdmin(interactionState) {
     <div>
       ${caseHeaderMarkup('Respuesta recibida')}
 
-      <div class="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 max-w-xl">
+      <div class="flex items-start gap-3 bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 mb-6 max-w-xl shadow-sm">
         <div class="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">${fileIconSvg('w-4 h-4')}</div>
         <div>
           <p class="text-sm font-semibold text-amber-800">COFEPRIS ha emitido respuesta</p>
@@ -905,17 +1004,17 @@ function renderRespuestaAdmin(interactionState) {
         </div>
       </div>
 
-      <div class="border border-lawbiz-gray-mid rounded-xl p-5 max-w-xl bg-lawbiz-gray">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-5 max-w-xl bg-lawbiz-gray">
         ${cofeprisResponseMarkup()}
         <div class="mt-4 flex justify-center">
           ${notified
-            ? `<span class="inline-flex items-center gap-2 px-4 py-2.5 bg-green-100 text-green-700 rounded-lg font-semibold text-sm">✓ Cliente notificado</span>`
-            : `<button id="btn-notificar-cliente" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Notificar al cliente y solicitar pago</button>`}
+            ? confirmedBadge('Cliente notificado')
+            : `<button id="btn-notificar-cliente" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Notificar al cliente y solicitar pago</button>`}
         </div>
       </div>
 
       ${notified ? `
-      <div class="mt-6 max-w-xl bg-blue-50 border border-blue-200 rounded-xl p-4 animate-fade-slide-up flex items-center justify-between gap-3 flex-wrap">
+      <div class="mt-6 max-w-xl bg-blue-50 border-l-4 border-blue-400 rounded-xl p-4 shadow-sm animate-fade-slide-up flex items-center justify-between gap-3 flex-wrap">
         <p class="text-sm text-blue-800">Pago solicitado: <strong class="font-semibold">$1,000 MXN</strong></p>
         <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 whitespace-nowrap">Pendiente</span>
       </div>` : ''}
@@ -971,7 +1070,7 @@ function renderRespuestaMobile(interactionState) {
 /* ---------------- PANTALLA 7: DIDGI DEMANDA ---------------- */
 function didgiPdfPreviewMarkup() {
   return `
-    <div class="bg-white border border-lawbiz-gray-mid rounded-lg shadow-sm p-6 mx-auto" style="max-width: 420px;">
+    <div class="pdf-preview-in bg-white border border-lawbiz-gray-mid rounded-lg p-6 mx-auto" style="max-width: 420px;">
       <div class="flex items-center gap-2 pb-3 border-b border-lawbiz-gray-mid mb-4">
         <div class="text-lawbiz-dark w-5 h-6">${logoIconSvg('w-full h-full')}</div>
         <span class="font-display text-sm font-semibold text-lawbiz-dark tracking-wide">LAWBIZ</span>
@@ -997,18 +1096,18 @@ function renderDidgiAdmin(interactionState) {
 
   const actionArea = !generated
     ? `
-      <div class="border border-lawbiz-gray-mid rounded-xl p-6 max-w-xl">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-6 max-w-xl">
         <h3 class="font-display text-lg text-lawbiz-dark mb-2">Generar Denuncia por Incumplimiento</h3>
         <p class="text-sm text-lawbiz-text-light mb-4">Último escrito del proceso. Se presenta ante el Juzgado de Distrito contra la negativa de COFEPRIS.</p>
-        <button id="btn-generar-didgi" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Generar Denuncia</button>
+        <button id="btn-generar-didgi" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Generar Denuncia</button>
       </div>`
     : `
-      <div class="border border-lawbiz-gray-mid rounded-xl p-5 max-w-xl bg-lawbiz-gray">
+      <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-5 max-w-xl bg-lawbiz-gray">
         ${didgiPdfPreviewMarkup()}
         <div class="mt-4 flex flex-col items-center gap-2">
           ${sent
-            ? `<span class="inline-flex items-center gap-2 px-4 py-2.5 bg-green-100 text-green-700 rounded-lg font-semibold text-sm">✓ Requisición enviada</span>`
-            : `<button id="btn-enviar-requisicion-2" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition-colors cursor-pointer">Enviar requisición de firma al cliente</button>`}
+            ? confirmedBadge('Requisición enviada')
+            : `<button id="btn-enviar-requisicion-2" type="button" class="px-6 py-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg transition hover:shadow-md active:scale-[0.98] cursor-pointer">Enviar requisición de firma al cliente</button>`}
           <p class="text-xs text-lawbiz-text-light">El cliente debe firmar 1 original + 3 copias</p>
         </div>
       </div>`;
@@ -1042,9 +1141,9 @@ function renderDidgiMobile(interactionState) {
                 3. Firma el original<br>
                 4. Envía todo a la dirección indicada
               </p>
-              <button type="button" class="w-full mt-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer">Subir documentos</button>
+              <button type="button" class="w-full mt-3 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg py-2 text-sm transition hover:shadow-md active:scale-[0.98] cursor-pointer">Subir documentos</button>
             </div>
-            <div class="mt-3 bg-white border border-lawbiz-gray-mid rounded-xl p-3">
+            <div class="mt-3 bg-white border border-lawbiz-gray-mid rounded-xl shadow-sm p-3">
               <p class="text-[11px] font-semibold text-lawbiz-lime uppercase tracking-wide mb-1">Guía prepagada disponible</p>
               <p class="text-xs text-lawbiz-text-light mb-3">Compra tu guía de envío prepagada y evita hacer fila en la oficina de paquetería.</p>
               ${stripeFormMarkup('$190 MXN', 'Pagar y descargar guía')}
@@ -1098,7 +1197,7 @@ function paymentSummaryMarkup() {
     </div>`).join('');
 
   return `
-    <div class="border border-lawbiz-gray-mid rounded-xl p-5">
+    <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-5">
       <h3 class="font-display text-lg text-lawbiz-dark mb-1">Resumen de pagos</h3>
       <div class="divide-y divide-lawbiz-gray-mid">
         ${rowsMarkup}
@@ -1112,7 +1211,7 @@ function paymentSummaryMarkup() {
 
 function clientContactMarkup() {
   return `
-    <div class="border border-lawbiz-gray-mid rounded-xl p-5">
+    <div class="border border-lawbiz-gray-mid rounded-xl shadow-sm p-5">
       <h3 class="font-display text-lg text-lawbiz-dark mb-3">Datos de contacto</h3>
       <div class="space-y-2 text-sm">
         <p class="text-lawbiz-text"><span class="text-lawbiz-text-light">Cliente:</span> María García López</p>
@@ -1128,13 +1227,13 @@ function renderEsperaFinalAdmin() {
     <div>
       ${caseHeaderMarkup('Demanda ingresada')}
 
-      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 max-w-3xl">
+      <div class="bg-blue-50 border-l-4 border-blue-400 rounded-xl p-4 mb-6 max-w-3xl shadow-sm">
         <p class="text-sm text-blue-800"><strong class="font-semibold">Demanda ingresada ante Juzgado de Distrito</strong> — Esperando resolución judicial.</p>
         <p class="text-xs text-blue-700/70 mt-1">Tiempo estimado: 3-4 meses</p>
       </div>
 
       <div class="grid grid-cols-5 gap-6 max-w-4xl">
-        <div class="col-span-3 border border-lawbiz-gray-mid rounded-xl h-fit">
+        <div class="col-span-3 border border-lawbiz-gray-mid rounded-xl shadow-sm h-fit">
           ${renderMobileTimeline(caseTimelineItems(), { heading: 'Historial del caso' })}
         </div>
         <div class="col-span-2 space-y-4">
@@ -1167,7 +1266,7 @@ function renderEsperaFinalMobile() {
           </div>
           <p class="text-xs text-lawbiz-text-light mt-2">Tiempo estimado: 3-4 meses</p>
         </div>
-        <div class="mt-3 bg-white border-2 border-lawbiz-lime rounded-xl p-3">
+        <div class="mt-3 bg-white border-2 border-lawbiz-lime rounded-xl p-3 shadow-sm">
           <p class="text-xs text-lawbiz-dark leading-relaxed">Estás en el último paso. Te notificaremos cuando llegue tu autorización.</p>
         </div>`,
     },
@@ -1240,7 +1339,7 @@ function renderCtaScreen() {
         ${bulletsMarkup}
       </div>
       <p class="text-lg text-white/90 mb-6">¿Listo para transformar tu proceso?</p>
-      <button type="button" class="px-8 py-3.5 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-base transition-colors cursor-pointer">Platiquemos</button>
+      <button type="button" class="px-8 py-3.5 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-base transition hover:shadow-lg active:scale-[0.98] cursor-pointer">Platiquemos</button>
     </div>`;
 }
 
@@ -1409,11 +1508,11 @@ function renderNavButtons(step) {
   } else if (step === 7) {
     next.disabled = false;
     next.textContent = 'Ver cierre →';
-    next.className = 'px-4 py-2 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-sm cursor-pointer transition-colors';
+    next.className = 'px-4 py-2 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-sm cursor-pointer transition hover:shadow-md active:scale-[0.98]';
   } else {
     next.disabled = false;
     next.textContent = 'Siguiente →';
-    next.className = 'px-4 py-2 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-sm cursor-pointer transition-colors';
+    next.className = 'px-4 py-2 bg-lawbiz-lime hover:bg-lawbiz-lime-light text-lawbiz-dark font-semibold rounded-lg text-sm cursor-pointer transition hover:shadow-md active:scale-[0.98]';
   }
 }
 
